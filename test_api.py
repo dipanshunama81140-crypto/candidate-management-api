@@ -10,7 +10,7 @@ def test_register_and_login(client):
     # 2. Test Login & Get Token (Using JSON)
     login_response = client.post(
         "/api/v1/auth/login",
-        json={"email": "tester@example.com", "password": "pass123"},
+        data={"username": "tester@example.com", "password": "pass123"},
     )
     assert login_response.status_code == 200
     token_data = login_response.json()
@@ -34,7 +34,7 @@ def test_full_candidate_workflow(client):
     )
     login_res = client.post(
         "/api/v1/auth/login",
-        json={"email": "recruiter@example.com", "password": "pass123"},
+        data={"username": "recruiter@example.com", "password": "pass123"},
     )
     assert login_res.status_code == 200, f"Login failed: {login_res.json()}"
     

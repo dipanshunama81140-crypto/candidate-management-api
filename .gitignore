@@ -4,3 +4,4 @@ __pycache__/
 candidates.db
 .env
 venv/
+app.log

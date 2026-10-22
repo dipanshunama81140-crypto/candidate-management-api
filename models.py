@@ -1,4 +1,6 @@
-from sqlalchemy import Column, Integer, String, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Index
+from sqlalchemy.sql.expression import text
+from sqlalchemy.sql.sqltypes import TIMESTAMP
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -6,13 +8,12 @@ from database import Base
 class Candidate(Base):
     __tablename__ = "candidates"
 
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True)
-    skill = Column(String)
-    experience = Column(Integer)
-# Foreing key column: ye btata he ki candidate kis user ne banaya 
+    id = Column(Integer, primary_key=True, nullable=False)
+    name = Column(String, index=True, nullable=False)
+    skill = Column(String, index=True, nullable=False)
+    experience = Column(Integer, nullable=False)
     owner_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-
+    create_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text('now()'))
 # SQLAlchemy Relationship: Candidate se direct object access kaene ke liye
 owner = relationship("User")
 
@@ -20,6 +21,11 @@ owner = relationship("User")
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
     password = Column(String, nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text('now()'))
+
+__table_args__ = (
+    Index("idx_candidate_skill_experience", "skill", "experience"),
+)

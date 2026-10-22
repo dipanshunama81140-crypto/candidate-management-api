@@ -1,11 +1,14 @@
+import json
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
-
+from redis_client import get_redis, invalidate_candidate_cache
 import models
 import schemas
 from database import get_db
 import oauth2
+import redis
+import asyncio
 
 router = APIRouter(
     prefix="/api/v1/candidates",
@@ -21,27 +24,81 @@ def search_by_skill(skill: str, db: Session = Depends(get_db)):
 @router.get("",response_model=list[schemas.CandidateResponse])
 def get_all_candidates(
     db: Session = Depends(get_db),
+    redis_conn: redis.Redis = Depends(get_redis),
     limit: int = 10,
     skip: int = 0,
     search: str = ""
 ): 
-    # Pagination: limit controls  batch size, skip controls offset
+    # Unique Cache key generate karein query params ke basis par
+    cache_key = f"candidates:limit={limit}:skip={skip}:search={search}"
+
+    # 1. Check Redis Cache
+    cached_data = redis_conn.get(cache_key)
+    if cached_data:
+        # Cache Hit: Direct RAM se fast response
+        print(f"\n[REDIS] CACHE HIT for key: {cache_key}\n")
+    # 2. Cache Miss: PostgreSQL query run karein
+    print(f"\n[DATABASE] CACHE MISS - Fetching from PostgreSQL for key: {cache_key}\n")
     candidates = (
         db.query(models.Candidate)
         .filter(models.Candidate.skill.ilike(f"%{search}%"))
+        .limit(limit)
         .offset(skip)
         .all()
     )
+
+    # 3. SQLAlchemy object ko dict me convert karke Redis me store karein (TTL: 60 seconds)
+    serialized_candidates = [
+        {
+            "id": c.id,
+            "name": c.name,
+            "skill": c.experience,
+            "owener_id": c.owner_id
+        }
+        for c in candidates
+    ]
+    # Set cache with 60 seconds expiration
+    redis_conn.setex(cache_key, 60, json.dumps(serialized_candidates))
     return candidates
 
-# 3. Read One Candidate
+
+# 3. Asynchronous Concurrent Verification Endpoint
+async def verify_candidate_profile(candidate_id: int):
+    # Simulate network I/O latency (external background check service)
+    await asyncio.sleep(1)
+    return {"candidate_id": candidate_id, "verification_status": "CLEARED"}
+
+@router.get("/verify-batch", status_code=status.HTTP_200_OK)
+async def verify_candidates_batch(
+    current_user: models.User = Depends(oauth2.get_current_user)
+):
+    candidate_ids = [101, 102, 103, 104, 105]
+
+    # Synchronous flow me 5 * 1s = 5 seconds lagte.
+    # asyncio.gather se saare 5 network calls parallel trigger honge: Total time ~ 1 second.
+    start_time = asyncio.get_event_loop().time()
+    
+    results = await asyncio.gather(
+        *(verify_candidate_profile(c_id) for c_id in candidate_ids)
+    )
+
+    total_time = asyncio.get_event_loop().time() - start_time
+
+    return {
+        "execution_mode": "concurrent_async",
+        "total_time_taken": f"{total_time:.4f} seconds",
+        "verified_profiles": results
+    }
+
+
+# 4. Read One Candidate
 @router.get("/{candidate_id}", response_model=schemas.CandidateResponse)
 def get_Candidate(candidate_id: int, db: Session = Depends(get_db)):
     candidate = db.query(models.Candidate).filter(models.Candidate.id == candidate_id).first()
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")
     return candidate
-# 4. Create Candidate (Logged-in user ki ID link hoti hai)
+# 5. Create Candidate (Logged-in user ki ID link hoti hai)
 @router.post("/", response_model=schemas.CandidateResponse, status_code=status.HTTP_201_CREATED)
 def create_candidate(
     candidate: schemas.CandidateCreate,
@@ -57,9 +114,10 @@ def create_candidate(
     db.add(new_candidate)
     db.commit()
     db.refresh(new_candidate)
+    invalidate_candidate_cache()
     return new_candidate
 
-# 5. Update Candidate (Sirf candidate ka owner hi edit kar sakta hai)
+# 6. Update Candidate (Sirf candidate ka owner hi edit kar sakta hai)
 @router.put("/{candidate_id}", response_model=schemas.CandidateResponse)
 def update_candidate(
     candidate_id: int,
@@ -80,9 +138,10 @@ def update_candidate(
     candidate_query.update(update_data.model_dump(), synchronize_session=False)
     db.commit()
     db.refresh(candidate)
+    invalidate_candidate_cache()
     return candidate
 
-# 6. Delete Candidate (sirf candidate ka owner hi delet kar sakta hai)
+# 7. Delete Candidate (sirf candidate ka owner hi delet kar sakta hai)
 @router.delete("/{candidate_id}",status_code=status.HTTP_200_OK)
 def delete_candidate(
     candidate_id: int,
@@ -101,4 +160,52 @@ def delete_candidate(
         )
     candidate_query.delete(synchronize_session=False)
     db.commit()
+    invalidate_candidate_cache()
     return {"message": "Candidate successfully deletes from database!"}
+
+# 8. Bulk Create Candidate with Atomic Transaction & Rollback
+@router.post("/bulk", response_model=List[schemas.CandidateResponse], status_code=status.HTTP_201_CREATED)
+def bulk_create_candidate(
+    candidates_in: List[schemas.CandidateCreate],
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(oauth2.get_current_user)
+):
+    if not candidates_in:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            details="List cannot be empty"
+        )
+
+    created_records = []
+
+    try: 
+        #Atomic Block Start
+        for item in candidates_in:
+                if item.experience < 0:
+                    raise ValueError(f"Invalid experince: {item.experience} for candidate {item.name}")
+
+                new_candidate = models.Candidate(
+                    name=item.name,
+                    skill=item.skill,
+                    experience=item.experience,
+                    owner_id=current_user.id
+                )
+                db.add(new_candidate)
+                created_records.append(new_candidate)
+
+        db. commit()
+
+        for record in created_records:
+                db.refresh(record)
+
+        invalidate_candidate_cache()
+
+        return created_records
+    except Exception as e:
+
+        db.rollback()
+        print(f"\n[DATABASE] TRANSACTION FAILED & ROLLED BACK: {str(e)}\n")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Transaction rolled back to error: {str(e)}"
+        )
