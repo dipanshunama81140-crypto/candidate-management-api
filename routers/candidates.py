@@ -1,7 +1,7 @@
 import json
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from redis_client import get_redis, invalidate_candidate_cache
 import models
 import schemas
