@@ -1,0 +1,49 @@
+name: Continuos Integration Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-and-lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Repository checkout
+      - name: checkout Code
+        uses: actions/checkout@v4
+      
+      # 2. Python runtime setup
+      - name: Set up Python
+        uses: actions/setup-Python@v5
+        with: 
+          python-version: "3.11"
+
+      # 3. Cache Dependencies to speed up pipline
+      - name: Cache Pip Dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt')}}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      # 4. Install production dependencies
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install httpx pytest
+
+      # .5 Run Pytest Suite
+      - name: Execute Automated Tests
+        env: 
+          DATABASE_URL: "sqlite:///./test_ci.db"
+          SECRET_KEY: "ci_pipeline_dummy_secret_key"
+          ALGORITHM: "HS256"
+          ACCESS_TOKEN_EXPIRE_MINUTES: 60
+          REDIS_URL: "redis://localhost:6379"
+        run: |
+          pytest -v

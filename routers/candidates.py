@@ -99,6 +99,7 @@ def get_Candidate(candidate_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Candidate not found")
     return candidate
 # 5. Create Candidate (Logged-in user ki ID link hoti hai)
+@router.post("", response_model=schemas.CandidateResponse, status_code=status.HTTP_201_CREATED)
 @router.post("/", response_model=schemas.CandidateResponse, status_code=status.HTTP_201_CREATED)
 def create_candidate(
     candidate: schemas.CandidateCreate,
