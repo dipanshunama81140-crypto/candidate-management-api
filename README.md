@@ -1,5 +1,7 @@
 # Candidate Management API
 
+![CI Pipeline](https://github.com/dipanshunama81140-crypto/candidate-management-api/actions/workflows/ci.yml/badge.svg)
+
 A production-ready, modular RESTful API built with **FastAPI**, **SQLAlchemy ORM**, and **PostgreSQL (Neon)**. Designed following the 12-Factor App methodology with automated database migrations, JWT authentication, rate limiting, and automated testing.
 
 ---
