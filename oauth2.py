@@ -31,11 +31,11 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session=Depends(da
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id = payload.get("user_id")
         if user_id is None:
-            raise HTTPException(status_code=401, detail="Debug: user_id is None in token payload")
+            raise credentials_exception
     except JWTError as e:
-        raise HTTPException(status_code=401, detail=f"Debug JWTError: {str(e)}")
+        raise credentials_exception
 
     user = db.query(models.User).filter(models.User.id == int(user_id)).first()
     if user is None:
-        raise HTTPException(status_code=401, detail=f"Debug UserNotFound: ID {user_id} not found in DB")
+        raise credentials_exception
     return user 
