@@ -24,41 +24,42 @@ def search_by_skill(skill: str, db: Session = Depends(get_db)):
 @router.get("",response_model=list[schemas.CandidateResponse])
 def get_all_candidates(
     db: Session = Depends(get_db),
-    redis_conn: redis.Redis = Depends(get_redis),
+    current_user: models.User = Depends(oauth2.get_current_user),
     limit: int = 10,
     skip: int = 0,
-    search: str = ""
+    search: Optional[str] = None
 ): 
     # Unique Cache key generate karein query params ke basis par
-    cache_key = f"candidates:limit={limit}:skip={skip}:search={search}"
+    cache_key = f"candidates:{current_user.id}:{limit}:{skip}:{search}"
 
-    # 1. Check Redis Cache
-    cached_data = redis_conn.get(cache_key)
-    if cached_data:
-        # Cache Hit: Direct RAM se fast response
-        print(f"\n[REDIS] CACHE HIT for key: {cache_key}\n")
-    # 2. Cache Miss: PostgreSQL query run karein
-    print(f"\n[DATABASE] CACHE MISS - Fetching from PostgreSQL for key: {cache_key}\n")
-    candidates = (
-        db.query(models.Candidate)
-        .filter(models.Candidate.skill.ilike(f"%{search}%"))
-        .limit(limit)
-        .offset(skip)
-        .all()
-    )
+    # 1. Safe Cache Lookup
+    redis_conn = get_redis()
+    if redis_conn:
+        try:
+            cached_data = redis_conn.get(cache_key)
+            if cached_data:
+                return json.loads(cached_data)
+        except Exception as e:
+            print(f"[REDIS GET WARNING]: {e}")
 
-    # 3. SQLAlchemy object ko dict me convert karke Redis me store karein (TTL: 60 seconds)
-    serialized_candidates = [
-        {
-            "id": c.id,
-            "name": c.name,
-            "skill": c.experience,
-            "owener_id": c.owner_id
-        }
-        for c in candidates
-    ]
-    # Set cache with 60 seconds expiration
-    redis_conn.setex(cache_key, 60, json.dumps(serialized_candidates))
+    # 2. Database Fetch
+    query = db.query(models.Candidate).filter(models.Candidate.owner_id == current_user.id)
+    if search:
+        query = query.filter(models.Candidate.name.ilike(f"%{search}%"))
+    candidates = query.offset(skip).limit(limit).all()
+
+    # 3. Safe Cache Set
+    if redis_conn:
+        try:
+            # Serializing response for cache
+            serialized_data = [
+                schemas.CandidateResponse.model_validate(c).model_dump(mode="json") 
+                for c in candidates
+            ]
+            redis_conn.setex(cache_key, 60, json.dumps(serialized_data))
+        except Exception as e:
+            print(f"[REDIS SET WARNING]: {e}")
+
     return candidates
 
 
