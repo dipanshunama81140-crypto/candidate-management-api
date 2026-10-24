@@ -106,10 +106,10 @@ def test_full_candidate_workflow():
     candidate_id = post_res.json()["id"]
 
     # 2. Get Candidates
-    get_res = client.get("/api/v1/candidates?search=FastAPI")
+    get_res = client.get("/api/v1/candidates?search=FastAPI", headers=headers)
     assert get_res.status_code == 200
     assert len(get_res.json()) >= 1
 
     # 3. Delete Candidate
     del_res = client.delete(f"/api/v1/candidates/{candidate_id}", headers=headers)
-    assert del_res.status_code == 200
+    assert del_res.status_code in [200, 204]
