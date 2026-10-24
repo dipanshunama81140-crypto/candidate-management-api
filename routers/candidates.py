@@ -9,6 +9,7 @@ from database import get_db
 import oauth2
 import redis
 import asyncio
+from sqlalchemy import or_
 
 router = APIRouter(
     prefix="/api/v1/candidates",
@@ -45,7 +46,12 @@ def get_all_candidates(
     # 2. Database Fetch
     query = db.query(models.Candidate).filter(models.Candidate.owner_id == current_user.id)
     if search:
-        query = query.filter(models.Candidate.name.ilike(f"%{search}%"))
+        query = query.filter(
+            or_(
+                models.Candidate.name.ilike(f"%{search}%"),
+                models.Candidate.skill.ilike(f"%{search}%")
+            )
+        )
     candidates = query.offset(skip).limit(limit).all()
 
     # 3. Safe Cache Set
